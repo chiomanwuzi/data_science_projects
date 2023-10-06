@@ -1,0 +1,235 @@
+---
+title: "Health E-Commerce Project"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+install.packages("readr", repos="https://cran.rstudio.com" )
+library(readr)
+
+install.packages("sqldf", repos="https://cran.rstudio.com" )
+library(sqldf)
+        
+devtools::install_github("ropensci/plotly")
+library(plotly)
+
+install.packages("lubridate", repos="https://cran.rstudio.com" )
+library(lubridate)
+
+#load in the 5 datasets
+checkout_started <- read_csv("Downloads/3.1_web analytics/raw data/checkout_started.csv")
+names(checkout_started)<- tolower(names(checkout_started))
+checkout_step_completed <- read_csv("Downloads/3.1_web analytics/raw data/checkout_step_completed.csv")
+names(checkout_step_completed)<- tolower(names(checkout_step_completed))
+identifies <- read_csv("Downloads/3.1_web analytics/raw data/identifies.csv")
+names(identifies)<- tolower(names(identifies))
+order_completed <- read_csv("Downloads/3.1_web analytics/raw data/order_completed.csv")
+names(order_completed)<- tolower(names(order_completed))
+payment_info_entered <- read_csv("Downloads/3.1_web analytics/raw data/payment_info_entered.csv")
+names(payment_info_entered)<- tolower(names(payment_info_entered))
+product_added <- read_csv("Downloads/3.1_web analytics/raw data/product_added.csv")
+names(product_added)<- tolower(names(product_added))
+product_viewed <- read_csv("Downloads/3.1_web analytics/raw data/product_viewed.csv")
+names(product_viewed)<- tolower(names(product_viewed))
+
+
+```
+
+
+
+```{r}
+sum(duplicated(checkout_started$user_id)) == nrow(checkout_started)
+sum(duplicated(checkout_started$anonymous_id)) == nrow(checkout_started)
+
+sum(duplicated(checkout_step_completed$anonymous_id)) == nrow(checkout_started)
+
+
+sum(duplicated(identifies$anonymous_id)) == nrow(identifies)
+
+```
+1. How would you do identity stitching, i.e. determine which events belong to which user?
+
+The first step would be be to generate an aggregate table that shows the id of each of the events that ws completed by anonymous id, since the anonymous id seems to be the most granular form of identification. This first table, "event_master" will contain all of the event id's that correspond to the six major steps provided in the tables, with the applicable identifiers. The queries below create tables that accounts for the events first by anonymous id, and then by user if there is a user id in the identifies table. The subsequent table creates a similar table that contains the counts of each of the events by anonymous id and user id.
+
+
+```{r}
+
+
+event_master<-
+  sqldf(
+
+'select 
+    pv.anonymous_id
+    , i.user_id
+    , pv.id product_view_event
+    , pa.id product_add_event
+    , cs.id checkout_started_event
+    , cc.id checkout_completed_event
+    , pe.id payment_entered_event
+    , oc.id order_completed_event
+    
+    
+  from 
+  
+  product_viewed pv
+  left join payment_info_entered pe
+    on pv.anonymous_id = pe.anonymous_id
+  left join product_added pa
+    on pv.anonymous_id = pa.anonymous_id
+  left join checkout_started cs
+    on pv.anonymous_id = cs.anonymous_id
+  left join checkout_step_completed cc
+    on pv.anonymous_id = cc.anonymous_id
+  left join order_completed oc
+  on pv.anonymous_id = oc.anonymous_id
+  left join identifies i
+  on pv.anonymous_id = i.anonymous_id
+  group by pv.anonymous_id
+  
+    ')
+
+head(event_master)
+
+count_events<- sqldf("select 
+      em.anonymous_id
+    , em.user_id
+    , count(em.product_view_event)
+    , count(em.product_add_event)
+    , count(em.checkout_started_event)
+    , count(em.checkout_completed_event)
+    , count(em.payment_entered_event)
+    , count(em.order_completed_event)
+    
+    from event_master em
+    group by em.anonymous_id
+    
+    ")
+
+head(count_events)
+
+
+```
+
+
+
+2. How would you do purchase funnel analysis? What can you tell from the analysis that
+you did? What are your recommended actions we take based on your observation?
+
+The funnel below shows the steps from product view to order completed. These steps correspond with the different tables, with the exception of checkout started which is split into to separate segments based on if the user completed step one or step two. The largest drop in the overall funnel is from the product viewed stage to the product added stage. This makes sense and is the typical conversion funnel behavior for eccomerce business. The browsing to adding to cart stage will present a significant drop due to the the amount of page browsing and window shopping that is done before a consumer decides on the product they would like to purchase. There is a 33% retention rate between the product view stage and the add to cart stage of product. 
+
+After this initial stage the funnel becomes more narrow. The retention from the product added stage to the checkout started stage is 54%. This shows that about half of customers are not continuing the checkout process after adding a product to their cart. Adding a product to the cart shows very high intent to purchase, but that intent is somehow being mitigated. From exploratory analysis, it showed that typically users will only purchase a single item at a time. Therefore there is a low likelihood that a user will add multiple items to their cart. This may prompt a product change in which the user is immediately prompted to finish the checkout process after adding the item to their carts. Especially considering the funnel drop from viewing a product to adding and the further narrowing of the funnel. It would be best to capitalize on the intent that is demonstrated by adding to cart with prompts to finish the checkout process.
+
+The next part of the funnel is the second step of the checkout process and shows that 47% of the customers are retained. Besides the first initial stage, this stage represents the second highest drop off rate. This shows a high area of optimization. There may exist blockers between the checkout processes that are causing a customer to end the process after initiating the desire to checkout. If this is a lengthy process, it may be beneficial to simplify the steps. Another method of optimization could be to reduce any friction in the funnel that occurs before the payment process. This may be done by placing the "adding payment' process between the two checkout steps. 
+
+From that point, the retention from checkout completed to the order completed stage is about 90%. If the order completed stage is the stage in which the order has been fully fulfilled to the point of delivery. After adjusting for the delivery time of the shipment, this stage should be 100%. If that is not the case then this drop off at this stage can be used to understand either fulfillment errors when the purchase was no received or when the shipment is still unfulfilled.
+
+
+
+```{r}
+
+
+checkout_1<- subset(checkout_step_completed, checkout_step_completed$step == 1)
+checkout_2<- subset(checkout_step_completed, checkout_step_completed$step == 2)
+
+funnel <- plot_ly() 
+funnel <- funnel %>%
+  add_trace(
+  type = "funnel",
+  y = c("Product Viewed","Product Added", "Checkout Part 1","Checkout Part 2","Checkout Completed", "Payment Entered", "Order Completed"),
+  x = c(sum(!duplicated(product_viewed$anonymous_id)), 
+        sum(product_viewed$anonymous_id %in% product_added$anonymous_id),
+        sum(product_added$anonymous_id %in% checkout_started$anonymous_id),
+        sum(checkout_started$anonymous_id %in% payment_info_entered$anonymous_id),
+        sum(payment_info_entered$anonymous_id %in% checkout_1$anonymous_id),
+        sum(checkout_1$anonymous_id %in% checkout_2$anonymous_id),
+        sum(checkout_2$anonymous_id %in% order_completed$anonymous_id)
+        )) 
+funnel <- funnel %>%
+  layout(yaxis = list(categoryarray = c("Product Viewed","Product Added", "Checkout Part 1","Checkout Part 2", "Checkout Completed", "Payment Entered", "Order Completed")))
+funnel
+
+
+
+#are people dropping off between the two steps of the checkout process
+
+```
+
+
+3. What other useful insights can you mine out of the data?
+
+Looking at the product viewed page showed that the average and the median products viewed for the each anonymous id is both 1. Not until the top 10-20th percentile are users looking at more than one item.
+
+When subsetting the data for only those that have completed sign up and therefore have a user id, the average and the median products viewed are both are relatively one, with the signed up user cohort's average being slightly higher. Interesting enough, the percentile where the users who have signed up reach more than 1 product viewed is the top 30%. This may indicate that those that are signed up are slightly more likely to view more products.
+
+The product_added table shows that the most added product category is the "Essential for Women" category. The least added category is the Essential Prenatal following by Essential for Woman 50+ with less than 100 difference.
+
+Looking at referrals shows that Google is the largest referral channel by a very large margin. Depending on the ad structure, this could indicate that most of the referrals are organic. This is following by a refferal channel beginning with "start your journey" which I will assume is a referral link from a marketing channel. This is followed by Facebook and Youtube and then Byrdie. 
+
+As far as payment methods, Stripe Source is the most used payment method which I can assume is the direct payment adding method on the site, with Google Pay having the lowest number of purchase made with this method.
+
+The distribution of the product views across 24 hours shows that there is generally an even spread of the number of product views throughout the day with the exception being the very low period between 7-11AM everyday. This period shows low traffic and therefore a time marketing should avoid high cost campaigns  and focus on periods in which potential users are online and more susceptible to advertising. 2:00PM- 3:00PM are shown to be the periods with the highest number of product views.
+
+```{r}
+      
+#how many product views does a anonymous id usually have.
+
+views_per<-as.data.frame(table(product_viewed$anonymous_id))
+mean(views_per$Freq)
+median(views_per$Freq)
+quantile(views_per$Freq, c(.10,.20,.30,.40,.50,.60,.70,.80,.90,1))
+
+user_views<-subset(product_viewed, is.na(product_viewed$user_id) == FALSE )
+views_user<-as.data.frame(table(user_views$user_id))
+mean(views_user$Freq)
+median(views_user$Freq)
+quantile(views_user$Freq, c(.10,.20,.30,.40,.50,.60,.70,.80,.90,1))
+
+head(as.data.frame(table(product_viewed$context_page_referrer)))
+####
+table(product_added$name)
+table(payment_info_entered$payment_method)
+
+
+#####traffic by hour
+product_viewed$hour<- hour(product_viewed$timestamp)
+time_dist<-as.data.frame(table(product_viewed$hour))
+
+ggplot(time_dist, aes(Var1, Freq)) +
+    geom_bar(stat="identity", fill="#56B4E9") +
+    xlab("Hour of the Day") +
+    ylab("Number of Product Views") +
+    ggtitle("Distribution of Product Views Across 24 Hours")
+  
+
+
+
+```
+
+4. If you think the provided data is not sufficient to provide other more useful insights, what
+other data would you recommend to collect and why?
+
+One metric to understand conversion that can provide a lot of insight is duration. Understanding the length of time that a user spends on each of the steps can provide a lot of info into how the length of stay relates to how the user moves to different parts of the site. For example, the payment added page may have better conversion for those that are spending less time on the page. These people maybe using an external payment source such as paypal and apple pay, and this payment method my make it faster and easier for a user to complete the payment stage.
+
+One of the other limitations of the data particularly when it comes to funnel analysis is the lack of a sign up step. It is easy to see that at the payment step, the user is then assigned a user id once completed, indicating that this is where the sign-up occurs. To enhance the funnel, if there was a separate event that indicates where a user signup could be helpful in adding further granularity to the drop off trends.
+
+Another helpful metric could be that of the session. To understand if customers completes multiple steps in a single session, or if they leave the session, and come back to continue the funnel. This would be an identifier that goes beyond the anonymous id since it will be able to track all the events that is completed within a usrs visit.
+
+One limitation of the data provided, although this could be a problem on the data collection side is that the identifies table contains duplicated anonymous id's per user id. It would be helpful if the table was a dictionary contain a 1-1 match for anonymous id to user id. Since the duplicated id's most likely comes from the events that occurred when the usr was logged in versus not logged in, or for the events that occurred before the user created an account, it would be best for the anonymous id to be updated in the identifiers table and in other tables for better tracking. 
+
+
+
+5. Is there any issue with the provided data?
+
+It was brought to attention in the funnel that the payment info entered stage is a bit ambiguous. Following the map that was laid out in the exercise PDF, this stage would come directly after the checkout stages are completed. But it is shown that the numbers from the previous stage of checkout two and the subsequent stage of order completed do not indicate that the retention numbers for this step are accurate. The funnel loses retention numbers and then those numbers pick back up. My assumption is that there may be other steps where a user may be able to add their payment details and therefore they wouldn't need to repeat adding payment details on the page. If this is not the case, the payment entered step may be experiencing collection errors.
+
+Not a particular issue, but that data dictionary does not state whether the timestamps are in UTC or another format. If expansion to other countries is the eventual, it would be best to have all of the timestamps in a universal timestamp. This will allow the marketing effort and the understand of time distribution to be specific based on region without having to convert the timestamps for each analyses.
+
+
+
