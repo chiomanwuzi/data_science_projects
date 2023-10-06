@@ -1,0 +1,464 @@
+---
+title: "music_company Project"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+What Makes a Good Playlist?
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+options(scipen=999)
+
+install.packages("readr")
+library(readr)
+
+install.packages("tidyr")
+library(tidyr)
+
+install.packages("ggplot2")
+library(ggplot2)
+
+install.packages("dplyr")
+library(dplyr)
+
+install.packages("cluster")
+library(cluster)
+
+install.packages("factoextra")
+library(factoextra)
+
+install.packages("purrr")
+library(purrr)
+
+install.packages("plotly")
+library(plotly)
+
+install.packages("psych")
+library(psych)
+
+install.packages("MASS")
+library(MASS)
+
+
+#install.packages("stats")
+#libnrary(stats)
+
+playlist_data <- read_delim("Downloads/playlist_summary_external.txt", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+
+#rename the columns to be more intuitive
+colnames(playlist_data)[5:7]<- c("daily_active_users", "weekly_active_users", "monthly_active_users")
+View(playlist_data)
+
+nrow(playlist_data)
+ncol(playlist_data)
+
+###Create a second table that separates the tokens, including the playlist url, the playlist owner, streams, daily active users, and then
+#the tokens split up into different columns
+
+#Only going up to 10 tokens as a max
+token_df<- separate(playlist_data, 'tokens', paste("tokens", 1:5, sep="_"), sep=",", extra="drop")
+View(token_df)
+
+
+
+```
+
+Questions to Answer about the Data Set Through EDA
+1. What genre/ genre combinations are the most common?
+2. What genre/ genre combinations are the best by streams? 
+3. What genre/ genre combinations are the best by daily active users?
+4. Are any of the variables highly correlated?
+5. Is there a relationship with the number of tracks to the streams and daily active users.
+
+
+Exploratory Data Analysis
+
+1. Distribution Charts
+2. Percentiles
+3. Frequency Tables for the Genres and Moods.
+
+```{r}
+
+
+#Distribution of Numeric Variables
+
+outliers<- playlist_data[c(152033, 163727),]
+
+
+summary(outliers)
+
+
+###############3
+
+playlist_data<- playlist_data[-c(152033, 163727),]
+
+playlist_no_outliers<- playlist_data
+
+playlist_data<- subset(playlist_data, playlist_data$streams != 0)
+
+#todays streams 
+quantile_list<- c(.10, .20, .30, .40, .50, .60, .70, .80, .90, 1)
+top_5_quantile_list<- c(.90, .95, .99, 1)
+quantile(playlist_data$streams, quantile_list)
+
+#todays streams over 30 seconds
+quantile(playlist_data$stream30s, quantile_list)
+quantile(playlist_data$stream30s, top_5_quantile_list)
+
+nrow(subset(playlist_data, playlist_data$stream30s >= 210))
+
+
+ggplot(playlist_data, aes(x = stream30s, y = daily_active_users)) + 
+  geom_point(shape=23, fill="blue", size=3) +
+  ggtitle("Streams by Daily Active Users") +
+  xlab("Streams Over 30 Seconds") +
+  ylab("Daily Active Users") +
+  geom_vline(aes(xintercept = 54))
+  
+  
+# daily active users
+quantile(playlist_data$daily_active_users, top_5_quantile_list)
+# weekly active users
+quantile(playlist_data$weekly_active_users, top_5_quantile_list)
+#monthly_active_users
+quantile(playlist_data$monthly_active_users, top_5_quantile_list)
+# monthly active user previous month
+quantile(playlist_data$mau_previous_month, top_5_quantile_list)
+#monthly active users both months
+quantile(playlist_data$mau_both_months, top_5_quantile_list)
+#users
+quantile(playlist_data$users, top_5_quantile_list)
+#skippers
+quantile(playlist_data$skippers, top_5_quantile_list)
+#n_tracks
+quantile(playlist_data$n_tracks, top_5_quantile_list)
+#n_local_tracks
+quantile(playlist_data$n_local_tracks, top_5_quantile_list)
+#n_artists
+quantile(playlist_data$n_artists, top_5_quantile_list)
+#albums
+quantile(playlist_data$n_albums, top_5_quantile_list)
+#monthly streams 30 seconds
+quantile(playlist_data$monthly_stream30s, top_5_quantile_list)
+#monthly owner streams
+quantile(playlist_data$monthly_owner_stream30s, top_5_quantile_list)
+
+
+#Correlation Plot
+cor(playlist_data[3:11, 13:18])
+
+playlist_data$long_stream_perc<- playlist_data$stream30s/playlist_data$streams
+playlist_data$user_long_stream_ratio<- playlist_data$stream30s/playlist_data$daily_active_users
+playlist_data$mom_change<- (playlist_data$mau_previous_month- playlist_data$monthly_active_users)/playlist_data$mau_previous_month
+
+playlist_data$mom_change<- ifelse(playlist_data$mom_change == "-Inf", 0 , playlist_data$mom_change)
+
+playlist_data$user_long_stream_ratio<- ifelse(playlist_data$user_long_stream_ratio == "NaN", 0, playlist_data$user_long_stream_ratio)
+
+corr_df<- as.data.frame(cor(playlist_data[,c(3:11, 13:18,26:28)]))
+#corr_df<- subset(corr_df, corr_df == 1.00000000)
+
+corr_long_stream<- as.data.frame(cbind(row.names(corr_df), corr_df$long_stream_perc))
+colnames(corr_long_stream)<- c("Factor", "Correlation Level")
+corr_long_stream<- subset(corr_long_stream, corr_long_stream$`Correlation Level` != 1)
+
+
+ggplot(corr_long_stream, aes(x = Factor, y = sort(`Correlation Level`, decreasing = TRUE))) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(name = "Correlation Value", limits = c(-.2, .2))
+
+
+corr_user_ratio<- as.data.frame(cbind(row.names(corr_df), corr_df$user_long_stream_ratio))
+colnames(corr_user_ratio)<- c("Factor", "Correlation Level")
+corr_user_ratio<- subset(corr_user_ratio, corr_user_ratio$`Correlation Level` != 1)
+
+corr_mom_change<- as.data.frame(cbind(row.names(corr_df), corr_df$mom_change))
+colnames(corr_mom_change)<- c("Factor", "Correlation Level")
+corr_mom_change<- subset(corr_mom_change, corr_mom_change$`Correlation Level` != 1)
+
+
+ggplot(corr_df[], aes(x = row.names(corr_df), y = sort(long_stream_perc, decreasing = TRUE))) +
+  geom_bar(stat = "identity")
+
+
+#Create Summary Tables by Genre 1
+
+genre_stats_1<- playlist_data %>%
+group_by(genre_1) %>%
+summarise(mean_streams = mean(streams), mean_stream30s = mean(stream30s), mean_tracks = mean(n_tracks), mean_local_tracks = mean(n_local_tracks),
+          mean_artists = mean(n_local_tracks), mean_albums = mean(n_albums), mean_monthly_streams = mean(monthly_stream30s), 
+          mean_owner_stream_30s = mean(monthly_owner_stream30s))
+
+#Genre 2 
+
+genre_stats_2<- playlist_data %>%
+group_by(genre_2) %>%
+summarise(mean_streams = mean(streams), mean_stream30s = mean(stream30s), mean_tracks = mean(n_tracks), mean_local_tracks = mean(n_local_tracks),
+          mean_artists = mean(n_local_tracks), mean_albums = mean(n_albums), mean_monthly_streams = mean(monthly_stream30s), 
+          mean_owner_stream_30s = mean(monthly_owner_stream30s))
+
+
+#Genre 3
+
+genre_stats_3<- playlist_data %>%
+group_by(genre_3) %>%
+summarise(mean_streams = mean(streams), mean_stream30s = mean(stream30s), mean_tracks = mean(n_tracks), mean_local_tracks = mean(n_local_tracks),
+          mean_artists = mean(n_local_tracks), mean_albums = mean(n_albums), mean_monthly_streams = mean(monthly_stream30s), 
+          mean_owner_stream_30s = mean(monthly_owner_stream30s))
+
+
+#Mood 1
+
+mood_stats_1<- playlist_data %>%
+group_by(mood_1) %>%
+summarise(mean_streams = mean(streams), mean_stream30s = mean(stream30s), mean_tracks = mean(n_tracks), mean_local_tracks = mean(n_local_tracks),
+          mean_artists = mean(n_local_tracks), mean_albums = mean(n_albums), mean_monthly_streams = mean(monthly_stream30s), 
+          mean_owner_stream_30s = mean(monthly_owner_stream30s))
+
+#Mood 2
+
+mood_stats_2<- playlist_data %>%
+group_by(mood_1) %>%
+summarise(mean_streams = mean(streams), mean_stream30s = mean(stream30s), mean_tracks = mean(n_tracks), mean_local_tracks = mean(n_local_tracks),
+          mean_artists = mean(n_local_tracks), mean_albums = mean(n_albums), mean_monthly_streams = mean(monthly_stream30s), 
+          mean_owner_stream_30s = mean(monthly_owner_stream30s))
+
+
+#Mood 3
+
+mood_stats_3<- playlist_data %>%
+group_by(mood_3) %>%
+summarise(mean_streams = mean(streams), mean_stream30s = mean(stream30s), mean_tracks = mean(n_tracks), mean_local_tracks = mean(n_local_tracks),
+          mean_artists = mean(n_local_tracks), mean_albums = mean(n_albums), mean_monthly_streams = mean(monthly_stream30s), 
+          mean_owner_stream_30s = mean(monthly_owner_stream30s))
+
+
+
+#histogrms of the metrics, greater than 0 
+hist(which(playlist_data$streams > 0))
+hist(which(playlist_data$stream30s > 0))
+hist(which(playlist_data$daily_active_users > 0))
+hist(which(playlist_data$weekly_active_users > 0))
+hist(which(playlist_data$monthly_active_users > 0))
+
+########
+
+
+monthly_funnel <- plot_ly() 
+monthly_funnel <- monthly_funnel %>%
+  add_trace(
+  type = "funnel",
+  y = c("Monthly Active Users","Weekly Active Users", "Daily Active Users"),
+  x = c(mean(outliers$monthly_active_users), 
+        mean(outliers$weekly_active_users),
+        mean(outliers$daily_active_users)
+        )) 
+monthly_funnel <- monthly_funnel %>%
+  layout(yaxis = list(categoryarray = c("Monthly Active Users","Weekly Active Users", "Daily Active Users")))
+monthly_funnel
+
+
+
+#######
+
+View(outliers)
+
+
+########
+
+ggplot(playlist_data, aes(x = streams, y = daily_active_users)) + 
+  geom_point() +
+  ggTitle("Streams by Daily Active Users") +
+  ylab
+
+
+ggplot(playlist_data, aes(x = stream30s, y = daily_active_users)) + 
+  geom_point(shape=23, fill="blue", size=3) +
+  ggtitle("Streams by Daily Active Users") +
+  xlab("Streams Over 30 Seconds") +
+  ylab("Daily Active Users")
+
+
+```
+
+The question what makes a good playlist presents an unsupervised problem since there is not singular succinct metric (as defined in the data) that makes a great playlist. Because of this, the answer to this question will be approached using an unsupervised clustering method, as well as a supervised method.
+
+
+Unsupervised Analysis
+1. K- Means Clustering Algorithm
+
+```{r}
+
+playlist_data<- playlist_no_outliers
+set.seed(227)
+
+# function to compute total within-cluster sum of square 
+within_ss_function <- function(k) {
+  kmeans(playlist_data[c(3:11,13:18)], k, nstart = 10)$tot.withinss
+}
+
+num_clusters <- 2:15
+
+within_ss_values<- map_dbl(num_clusters, within_ss_function)
+
+plot(num_clusters, within_ss_values,
+       type="b", pch = 19, frame = FALSE, 
+       xlab="Number of Clusters",
+       ylab="Total Within-Clusters Sum of Squares")
+
+playlist_clusters<- kmeans(playlist_data[c(3:11,13:18)], 5)
+table(playlist_clusters$cluster)
+
+#cluster_summary<- playlist_clusters %>% split(.$cluster) %>% map(summary)
+
+
+playlist_data$long_stream_perc<- playlist_data$stream30s/playlist_data$streams
+playlist_data$user_long_stream_ratio<- playlist_data$stream30s/playlist_data$daily_active_users
+playlist_data$mom_change<- (playlist_data$mau_previous_month- playlist_data$monthly_active_users)/playlist_data$mau_previous_month
+
+playlist_data$mom_change<- ifelse(playlist_data$mom_change == "-Inf", 0 , playlist_data$mom_change)
+
+playlist_data$user_long_stream_ratio<- ifelse(playlist_data$user_long_stream_ratio == "NaN", 0, playlist_data$user_long_stream_ratio)
+
+
+cluster_df<- cbind(playlist_clusters$cluster, playlist_data)
+
+describeBy(cluster_df[,-c(1:3)], cluster_df[1])
+#cluster_summary
+
+
+#Genre Majority
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 1)[,21]))
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 2)[,21]))
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 3)[,21]))
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 4)[,21]))
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 5)[,21]))
+
+
+#Mood Majority
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 1)[,24]))
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 2)[,24]))
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 3)[,24]))
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 4)[,24]))
+table(as.data.frame(subset(cluster_df, cluster_df$`playlist_clusters$cluster` == 5)[,24]))
+
+
+
+```
+
+Notes:
+
+Cluster 1: Long Term Pop Success
+
+This playlist is in it for the long run. The month over month change in the monthly active users on the playlist is +8%, which is a low increase comparatively to the other clusters, meaning that the growth is stagnent, but the dedication of the users is strong.
+Although this cluster only has 13 playlists, these are successful playlists that have a lot of longevity and will be successful for a long term. This segment is made primarily made up of Excited Pop and Indie Rock playlists, and over 50% of the of the streams are for longer than 30 seconds. This segment includes the highest volume of streams, users, long streams, and the lowest month over month change. The most successful playlists are in this segment.
+
+13 Playlists 
+Excited, Pop and Indie Rock Majority
+Over 50 Long Stream Percentage
+About 10 songs Per User
+~141 Tracks
+greater than 350,000 monthly streams
+greater than 20,000 daily users
+12,000 skippers
+
+
+Cluster 2: 
+Personal Playlists Segments- 
+This segment includes the highest number of playlists at over 40,000. This segment is made up of majority of personal playlists. There is no genre or mood majority. There is also very little coverage of this playlist outside of the owner, since the owner makes up a majority of the listens in this playlist (about 33% of streams come from the owner). This allows metrics such as the percentage of long streams to be very high, while the average number of listeners and the average number of songs is very low (on average 1 daily active user).
+
+403122
+Genre Fluid/ No Genre Majority
+Personal Playlists- these are playlists that are made for the listening enjoyment of a particular person or close group- High Owner Streams
+There is very little coverage of this playlist outside of the owner of the playlist. This allows metrics such as the long
+stream percentage to be relatively high at 65%, but is mitigated due to the low volume of users and streams (15 users monthly, 10 steams more than 30 seconds per day)
+Average Streams Less than 20
+Daily Active Users ~1
+~40 users
+~33% of monthly streams come from owners
+~Monthly Active Users less than 5 for both months
+High Owner Streams
+
+
+Cluster 3: High Popularity, Mid Range Longevity. 
+
+This cluster contains 32 playlists, another low volume segment, but is also the segment with the seconds highest number of streams, users, and monthly active users. The largest difference between this segment and the larger segment is that the average month over change for this segment is increasing at a higher rate than the segment with the most popular playlists. A 25% month over month increase in over 30 second streams. This playlist is majority pop, Indie rock, and dance with an overall excited mood. Good user retention as users are on average listening to 9 songs in this playlist. No artist also appears in the playlist more than once. This plylist has a little less than half of the daily/weekly/monthly streams of the high rollers.
+
+32 Playlists
+Excited Pop, Indie Rock, and Dance Majority- High Tier Success
+greater than 150,000 daily streams
+about 10,000 daily active users
+each user is listerning to abotu 9 songs on this playlist
+the owner does not make up a majority of the streams.
+High artist range, as no artists has more than 1 song on the playlist.
+Monthly streams greater than 2 million
+High long stream percentage
+A little less than half of the daily/weekly/monthly streams of the first high rollers cluster
+
+
+Cluster 4:
+
+Defiant Low- Tier Playlist
+This segment contains playlists that can be considered low-tier. They do not have the daily/weekly/monthly volume of the playlists in the high roller segments, but they still pull volumes that are in the top 2% of the playlists. There are 151 playlists in this range. Similarly to the secondary high rollers segment, this cluster also has a low average month over month change in streams. There is also high long stream percentage and on average users are listening to about 11 songs. The mood of the playlists in this segment is primarily defiant and the genres are primarily Indie Rock and Pop. The playlist in this cluster also have a higher range for key metrics such as streams and over 30 seconds streams compared to the other clusters. Although the volumes differ, there are patterns in terms of retention that make the playlists in this cluster more similar to each other than those in other playlists.
+
+
+151 Playlists
+Defiant Indie Rock, Pop Majority
+Average Success 
+
+
+Cluster 5
+46 Playlists
+Excited Indie Rock and Pop
+Mid-Tier High Growth
+
+This segment is mid-tier are it falls right between the high tier and the low tier playlists. There are 46 playlists in this segment. This playlist is excited and contains mostly Indie Rock and Pop music. This playlist just barely touches the 1 million mark for monthly streams. But has the long long stream percentage similar to the high roller segments. Besides the segment for the playlists for personal use, this segemnt also includes the most tracks and the most artists that appear with more than one track in the playlist. This tier contains the playlists that have the highest growth with some playlists having an increase month over month of over 100%
+
+
+
+
+Supervised Analysis
+1. Backwards Regression
+
+
+
+
+```{r}
+
+quantile(playlist_data$user_long_stream_ratio, c(.90, .95, .99, 1))
+
+cluster_df$owner_country<- as.factor(cluster_df$owner_country)
+cluster_df$genre_1<- as.factor(cluster_df$genre_1)
+cluster_df$genre_2<- as.factor(cluster_df$genre_2)
+cluster_df$genre_3<- as.factor(cluster_df$genre_3)
+cluster_df$mood_1<- as.factor(cluster_df$mood_1)
+cluster_df$mood_2<- as.factor(cluster_df$mood_2)
+cluster_df$mood_3<- as.factor(cluster_df$mood_3)
+
+size_sample<- floor(0.75 * nrow(cluster_df))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_set <- sample(seq_len(nrow(cluster_df)), size = size_sample)
+
+training <- cluster_df[train_set, ]
+testing <- cluster_df[train_set, ]
+
+playlist_full_model<- lm(stream30s ~., data = training[-c(1:3,13,20)])
+
+backwards_model<- stepAIC(playlist_full_model, direction = "backward", 
+                      trace = FALSE)
+
+backwards_model$model
+
+
+
+
+```
+
+
